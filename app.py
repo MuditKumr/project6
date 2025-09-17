@@ -1,47 +1,30 @@
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, HTMLResponse
-from fastapi.templating import Jinja2Templates
-import firebase_admin
-from firebase_admin import credentials, firestore
-from datetime import datetime
+from fastapi import FastAPI
+from google.cloud import firestore
+from google.oauth2 import service_account
+import os, json
 
-# -----------------------------
-# Firebase Initialization
-# -----------------------------
-cred = credentials.Certificate("serviceAccountKey.json")
-if not firebase_admin._apps:
-    firebase_admin.initialize_app(cred)
-db = firestore.client()
-
-# -----------------------------
-# FastAPI App
-# -----------------------------
 app = FastAPI()
-templates = Jinja2Templates(directory="templates")
 
-# -----------------------------
-# Home Page (Frontend)
-# -----------------------------
-@app.get("/", response_class=HTMLResponse)
-async def home(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+# --- Firestore Setup ---
+# Load service account JSON from Render environment variable
+# (set FIREBASE_CREDENTIALS in Render Dashboard → Environment)
+creds_dict = json.loads(os.environ["FIREBASE_CREDENTIALS"])
+creds = service_account.Credentials.from_service_account_info(creds_dict)
 
-# -----------------------------
-# API Endpoint to Get Sensor Data
-# -----------------------------
+db = firestore.Client(credentials=creds, project=creds.project_id)
+
+# --- Routes ---
+@app.get("/")
+def root():
+    return {"message": "Sensor Data Dashboard API running"}
+
 @app.get("/sensors")
-async def get_sensors():
-    docs = db.collection("sensors").order_by("timestamp").stream()
-    results = []
+def get_sensors():
+    sensors_ref = db.collection("sensors")
+    docs = sensors_ref.stream()
+
+    sensor_data = []
     for doc in docs:
-        d = doc.to_dict()
-        d["doc_id"] = doc.id
-        if isinstance(d.get("timestamp"), datetime):
-            d["timestamp"] = d["timestamp"].strftime("%Y-%m-%d %H:%M:%S")
-        results.append(d)
+        sensor_data.append({"id": doc.id, **doc.to_dict()})
 
-    # Debug print to terminal
-    print("Fetched Data:", results)
-
-    return JSONResponse(content=results)
-
+    return {"sensors": sensor_data}
